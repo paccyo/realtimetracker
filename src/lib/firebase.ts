@@ -2,36 +2,23 @@
 import { initializeApp, getApp, getApps, FirebaseApp } from "firebase/app";
 import { getDatabase, Database } from "firebase/database";
 
+// Firebase configuration provided by the user
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  apiKey: "AIzaSyCnjI1sLDgAztoY26IdRMPqATARoD9qHuM",
+  authDomain: "chronotrack-u10nt.firebaseapp.com",
+  databaseURL: "https://chronotrack-u10nt-default-rtdb.firebaseio.com",
+  projectId: "chronotrack-u10nt",
+  storageBucket: "chronotrack-u10nt.firebasestorage.app",
+  messagingSenderId: "125029841927",
+  appId: "1:125029841927:web:97a624246dba73d9437ea2"
 };
 
 let app: FirebaseApp;
 
-// Firebase SDK's getDatabase() requires a projectId to determine the database URL,
-// even if databaseURL is provided in the config.
-// Throw an error if projectId is missing, as this is critical.
+// Basic check to ensure the hardcoded config has a projectId
 if (!firebaseConfig.projectId) {
   throw new Error(
-    "Firebase Configuration Error: `projectId` is missing. " +
-    "Ensure NEXT_PUBLIC_FIREBASE_PROJECT_ID is set in your .env.local file and is accessible."
-  );
-}
-
-// It's also good practice to have databaseURL, though the SDK might derive it from projectId.
-// If it's missing, log a warning.
-if (!firebaseConfig.databaseURL) {
-  console.warn(
-    "Firebase Configuration Warning: `databaseURL` is missing. " +
-    "The SDK will attempt to derive it from `projectId`. " +
-    "Ensure NEXT_PUBLIC_FIREBASE_DATABASE_URL is set if this derivation fails, " +
-    "or if your project uses a non-standard database URL."
+    "Firebase Configuration Error: `projectId` is missing in the hardcoded firebaseConfig object."
   );
 }
 
