@@ -1,6 +1,7 @@
 
 import { initializeApp, getApp, getApps, FirebaseApp } from "firebase/app";
 import { getDatabase, Database } from "firebase/database";
+import { getFirestore, Firestore } from "firebase/firestore";
 
 // Firebase configuration provided by the user
 const firebaseConfig = {
@@ -31,5 +32,6 @@ if (getApps().length === 0) {
 }
 
 const database: Database = getDatabase(app);
+const firestore: Firestore = getFirestore(app);
 
-export { app as firebaseApp, database };
+export { app as firebaseApp, database, firestore };

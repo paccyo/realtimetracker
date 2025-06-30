@@ -7,10 +7,12 @@ import { Card, CardContent } from '@/components/ui/card';
 interface MapDisplayProps {
   allDeviceData: DeviceData | null;
   selectedDevices: string[];
+  showOnlyLatest: boolean;
+  stores: DocumentData[];
 }
 
-const MIN_COORD = -5;
-const MAX_COORD = 30;
+export const MIN_COORD = -5;
+export const MAX_COORD = 30;
 const RANGE = MAX_COORD - MIN_COORD; // 35
 const POINT_RADIUS_SVG_UNITS = 0.3; // Radius of points in SVG coordinate units
 const LATEST_POINT_RADIUS_SVG_UNITS = 0.5;
@@ -24,7 +26,7 @@ const deviceColors = [
   "hsl(0, 70%, 60%)",    // A red (different from accent)
 ];
 
-export function MapDisplay({ allDeviceData, selectedDevices }: MapDisplayProps) {
+export function MapDisplay({ allDeviceData, selectedDevices, showOnlyLatest, stores }: MapDisplayProps) {
   const [hoveredPoint, setHoveredPoint] = useState<{ point: PointType; x: number; y: number; color: string } | null>(null);
 
   const transformCoordinates = (lon: number, lat: number) => {
@@ -68,6 +70,89 @@ export function MapDisplay({ allDeviceData, selectedDevices }: MapDisplayProps) 
     }).filter(p => p !== null);
   }, [allDeviceData, selectedDevices]);
 
+  const densityCircle = useMemo(() => {
+    const latestPoints = selectedDevices.map(deviceId => {
+      const device = allDeviceData?.[deviceId];
+      if (!device?.points) return null;
+      const pointsArray = Object.values(device.points)
+        .filter(p => typeof p.latitude === 'number' && typeof p.longitude === 'number' && p.timestamp)
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      return pointsArray.length > 0 ? pointsArray[0] : null;
+    }).filter((p): p is PointType => p !== null);
+
+    if (latestPoints.length < 2) return null;
+
+    const gridSize = 5; // Grid size in SVG units
+    const grid: { [key: string]: PointType[] } = {};
+
+    latestPoints.forEach(point => {
+      const { x, y } = transformCoordinates(point.longitude, point.latitude);
+      const gridX = Math.floor(x / gridSize);
+      const gridY = Math.floor(y / gridSize);
+      const key = `${gridX},${gridY}`;
+      if (!grid[key]) {
+        grid[key] = [];
+      }
+      grid[key].push(point);
+    });
+
+    let maxPoints = 0;
+    let densestCell: PointType[] | null = null;
+    let minPoints = Infinity;
+    let sparsestCell: PointType[] | null = null;
+
+    for (const key in grid) {
+      if (grid[key].length > maxPoints) {
+        maxPoints = grid[key].length;
+        densestCell = grid[key];
+      }
+      if (grid[key].length < minPoints) {
+        minPoints = grid[key].length;
+        sparsestCell = grid[key];
+      }
+    }
+
+    if (!densestCell || densestCell.length < 2) return null;
+
+    const transformedPointsDensest = densestCell.map(p => transformCoordinates(p.longitude, p.latitude));
+
+    const centerXDensest = transformedPointsDensest.reduce((sum, p) => sum + p.x, 0) / transformedPointsDensest.length;
+    const centerYDensest = transformedPointsDensest.reduce((sum, p) => sum + p.y, 0) / transformedPointsDensest.length;
+
+    const radiusDensest = Math.max(...transformedPointsDensest.map(p => {
+      const dx = p.x - centerXDensest;
+      const dy = p.y - centerYDensest;
+      return Math.sqrt(dx * dx + dy * dy);
+    }));
+
+    const denseCircle = {
+      cx: centerXDensest,
+      cy: centerYDensest,
+      r: radiusDensest + LATEST_POINT_RADIUS_SVG_UNITS, // Add padding
+    };
+
+    let sparseCircle = null;
+    if (sparsestCell && sparsestCell.length > 0) {
+      const transformedPointsSparsest = sparsestCell.map(p => transformCoordinates(p.longitude, p.latitude));
+      const centerXSparsest = transformedPointsSparsest.reduce((sum, p) => sum + p.x, 0) / transformedPointsSparsest.length;
+      const centerYSparsest = transformedPointsSparsest.reduce((sum, p) => sum + p.y, 0) / transformedPointsSparsest.length;
+
+      const radiusSparsest = transformedPointsSparsest.length > 0 ? Math.max(...transformedPointsSparsest.map(p => {
+        const dx = p.x - centerXSparsest;
+        const dy = p.y - centerYSparsest;
+        return Math.sqrt(dx * dx + dy * dy);
+      })) : LATEST_POINT_RADIUS_SVG_UNITS; // Default radius if only one point
+
+      sparseCircle = {
+        cx: centerXSparsest,
+        cy: centerYSparsest,
+        r: radiusSparsest + LATEST_POINT_RADIUS_SVG_UNITS, // Add padding
+      };
+    }
+
+    return { denseCircle, sparseCircle };
+  }, [allDeviceData, selectedDevices]);
+
   return (
     <Card className="w-full h-full shadow-lg overflow-hidden">
       <CardContent className="p-0 w-full h-full">
@@ -76,20 +161,18 @@ export function MapDisplay({ allDeviceData, selectedDevices }: MapDisplayProps) 
           preserveAspectRatio="xMidYMid meet"
           width="100%"
           height="100%"
-          className="bg-card"
           aria-label="Map of device paths"
         >
-          {/* Optional: Add a grid or axes lines for better orientation */}
-          {[...Array(RANGE + 1)].map((_, i) => {
-            const val = MIN_COORD + i;
-            // Subtle grid lines
-            return (
-              <React.Fragment key={`grid-${i}`}>
-                <line x1={MIN_COORD} y1={val} x2={MAX_COORD} y2={val} stroke="hsl(var(--border))" strokeWidth="0.05" />
-                <line x1={val} y1={MIN_COORD} x2={val} y2={MAX_COORD} stroke="hsl(var(--border))" strokeWidth="0.05" />
-              </React.Fragment>
-            )
-          })}
+          {/* Background Image */}
+          <image
+            href="/picture/142.png"
+            x={MIN_COORD}
+            y={MIN_COORD}
+            width={RANGE}
+            height={RANGE}
+            preserveAspectRatio="xMidYMid slice"
+            transform={`rotate(180, ${MIN_COORD + RANGE / 2}, ${MIN_COORD + RANGE / 2})`}
+          />
 
           {pathsToDisplay.map(devicePath => {
             if (!devicePath) return null;
@@ -104,8 +187,9 @@ export function MapDisplay({ allDeviceData, selectedDevices }: MapDisplayProps) 
                   strokeWidth={0.2} // Reasonable thickness for paths
                   className="map-path"
                   aria-label={`Path for device ${devicePath.id}`}
+                  style={{ display: showOnlyLatest ? 'none' : 'block' }}
                 />
-                {devicePath.points.map((p, index) => {
+                {(showOnlyLatest ? [latestPoint] : devicePath.points).map((p, index) => {
                   const { x, y } = transformCoordinates(p.longitude, p.latitude);
                   const isLatest = index === devicePath.points.length - 1;
                   return (
@@ -127,6 +211,30 @@ export function MapDisplay({ allDeviceData, selectedDevices }: MapDisplayProps) 
               </g>
             );
           })}
+
+          {densityCircle?.denseCircle && (
+            <circle
+              cx={densityCircle.denseCircle.cx}
+              cy={densityCircle.denseCircle.cy}
+              r={densityCircle.denseCircle.r}
+              fill="red"
+              fillOpacity="0.3"
+              stroke="red"
+              strokeWidth="0.1"
+            />
+          )}
+
+          {densityCircle?.sparseCircle && (
+            <circle
+              cx={densityCircle.sparseCircle.cx}
+              cy={densityCircle.sparseCircle.cy}
+              r={densityCircle.sparseCircle.r}
+              fill="blue"
+              fillOpacity="0.3"
+              stroke="blue"
+              strokeWidth="0.1"
+            />
+          )}
 
           {hoveredPoint && (
             <g transform={`translate(${hoveredPoint.x} ${hoveredPoint.y})`}>
@@ -153,6 +261,32 @@ export function MapDisplay({ allDeviceData, selectedDevices }: MapDisplayProps) 
               </text>
             </g>
           )}
+
+          {/* Render Stores */}
+          {stores.map(store => (
+            <g key={store.id}>
+              <rect
+                x={store.positionX}
+                y={store.positionY}
+                width={store.sizeX}
+                height={store.sizeY}
+                fill="rgba(0, 255, 0, 0.2)" // Green semi-transparent fill
+                stroke="green"
+                strokeWidth="0.1"
+              />
+              <text
+                x={store.positionX + store.sizeX / 2}
+                y={store.positionY + store.sizeY / 2}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontSize="0.8"
+                fill="black"
+                fontFamily="Inter, sans-serif"
+              >
+                {store.name}
+              </text>
+            </g>
+          ))}
         </svg>
       </CardContent>
     </Card>

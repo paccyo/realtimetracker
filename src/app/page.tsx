@@ -1,26 +1,36 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { getDatabase, ref as databaseRef, onValue } from "firebase/database";
-import { firebaseApp } from "@/lib/firebase";
+import { getDatabase, ref as databaseRef, onValue, set, push } from "firebase/database";
+import { collection, onSnapshot, query, DocumentData } from "firebase/firestore";
+import { firebaseApp, firestore } from "@/lib/firebase";
 import type { DeviceData } from "@/types";
 
 import { SidebarProvider, Sidebar, SidebarHeader, SidebarContent, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { DeviceSelector } from "@/components/DeviceSelector";
-import { MapDisplay } from "@/components/MapDisplay";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button"; // For potential future actions
 import { PanelLeft } from "lucide-react";
+import { MIN_COORD, MAX_COORD } from "@/components/MapDisplay";
+import Link from "next/link";
+import dynamic from 'next/dynamic';
+
+const MapDisplay = dynamic(() => import('@/components/MapDisplay').then(mod => mod.MapDisplay), { 
+  ssr: false,
+  loading: () => <Skeleton className="w-full h-full rounded-lg" />
+});
 
 
 export default function HomePage() {
   const [deviceData, setDeviceData] = useState<DeviceData | null>(null);
   const [allDeviceIds, setAllDeviceIds] = useState<string[]>([]);
   const [selectedDevices, setSelectedDevices] = useState<string[]>([]);
+  const [stores, setStores] = useState<DocumentData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
+  const [showOnlyLatest, setShowOnlyLatest] = useState(false);
 
   useEffect(() => {
     const db = getDatabase(firebaseApp);
@@ -65,6 +75,25 @@ export default function HomePage() {
     return () => unsubscribe();
   }, [toast]);
 
+  useEffect(() => {
+    const q = query(collection(firestore, "stores"));
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      const storesData: DocumentData[] = [];
+      querySnapshot.forEach((doc) => {
+        storesData.push({ id: doc.id, ...doc.data() });
+      });
+      setStores(storesData);
+    }, (error) => {
+      console.error("Error fetching stores: ", error);
+      toast({
+        title: "Firestore Error",
+        description: "Could not fetch store data.",
+        variant: "destructive",
+      });
+    });
+    return () => unsubscribe();
+  }, [toast]);
+
   const handleDeviceSelectionChange = useCallback((deviceId: string, checked: boolean) => {
     setSelectedDevices(prev => {
       if (checked) {
@@ -74,6 +103,40 @@ export default function HomePage() {
       }
     });
   }, []);
+
+  const handleSelectAllDevices = useCallback(() => {
+    setSelectedDevices(allDeviceIds);
+  }, [allDeviceIds]);
+
+  const handleDeselectAllDevices = useCallback(() => {
+    setSelectedDevices([]);
+  }, []);
+
+  const createDummyData = () => {
+    const db = getDatabase(firebaseApp);
+    const newDeviceId = `dummy-device-${Math.random().toString(36).substring(2, 8)}`;
+    const deviceRef = databaseRef(db, `devices/${newDeviceId}/points`);
+
+    const now = new Date();
+    const dummyPoints: { [key: string]: any } = {};
+    for (let i = 0; i < 5; i++) {
+      const timestamp = new Date(now.getTime() - i * 1000 * 60).toISOString(); // 1 minute intervals
+      const point = {
+        latitude: MIN_COORD + Math.random() * (MAX_COORD - MIN_COORD),
+        longitude: MIN_COORD + Math.random() * (MAX_COORD - MIN_COORD),
+        timestamp: timestamp,
+      };
+      const pointRef = push(deviceRef);
+      dummyPoints[pointRef.key!] = point;
+    }
+
+    set(databaseRef(db, `devices/${newDeviceId}`), { points: dummyPoints });
+
+    toast({
+      title: "Dummy Data Created",
+      description: `New device added: ${newDeviceId}`,
+    });
+  };
 
   return (
     <SidebarProvider defaultOpen={true}>
@@ -92,12 +155,23 @@ export default function HomePage() {
           )}
           {error && !isLoading && <p className="p-4 text-sm text-destructive">{error}</p>}
           {!isLoading && !error && (
-            <DeviceSelector
-              deviceIds={allDeviceIds}
-              selectedDevices={selectedDevices}
-              onSelectionChange={handleDeviceSelectionChange}
-            />
+            <>
+              <div className="flex justify-between p-4 border-b">
+                <Button onClick={handleSelectAllDevices} variant="outline" size="sm">Select All</Button>
+                <Button onClick={handleDeselectAllDevices} variant="outline" size="sm">Deselect All</Button>
+              </div>
+              <DeviceSelector
+                deviceIds={allDeviceIds}
+                selectedDevices={selectedDevices}
+                onSelectionChange={handleDeviceSelectionChange}
+              />
+            </>
           )}
+          <div className="p-4 border-t">
+            <Button onClick={() => setShowOnlyLatest(!showOnlyLatest)} variant="outline" className="w-full">
+              {showOnlyLatest ? "Show Full History" : "Show Only Latest"}
+            </Button>
+          </div>
         </SidebarContent>
       </Sidebar>
       <SidebarInset>
@@ -122,6 +196,8 @@ export default function HomePage() {
                 <MapDisplay
                   allDeviceData={deviceData}
                   selectedDevices={selectedDevices}
+                  showOnlyLatest={showOnlyLatest}
+                  stores={stores}
                 />
               </div>
             )}
@@ -140,6 +216,12 @@ export default function HomePage() {
               </div>
             )}
           </main>
+          <div className="absolute bottom-4 right-4 flex flex-col gap-2">
+            <Button onClick={createDummyData}>Create Dummy Data</Button>
+            <Link href="/settings">
+              <Button className="w-full">Settings</Button>
+            </Link>
+          </div>
         </div>
       </SidebarInset>
     </SidebarProvider>
