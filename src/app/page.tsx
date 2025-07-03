@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { CongestionThresholdProvider, useCongestionThreshold } from "@/context/CongestionThresholdContext";
 import { getDatabase, ref as databaseRef, onValue, set, push } from "firebase/database";
 import { collection, onSnapshot, query, DocumentData } from "firebase/firestore";
 import { firebaseApp, firestore } from "@/lib/firebase";
@@ -13,6 +14,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button"; // For potential future actions
 import { PanelLeft } from "lucide-react";
 import { MIN_COORD, MAX_COORD } from "@/components/MapDisplay";
+import { Slider } from "@/components/ui/slider";
+
+const MOVEMENT_DELTA = 0.5; // Adjust this value for smaller/larger movements
+
 import Link from "next/link";
 import dynamic from 'next/dynamic';
 
@@ -23,6 +28,14 @@ const MapDisplay = dynamic(() => import('@/components/MapDisplay').then(mod => m
 
 
 export default function HomePage() {
+  return (
+    <CongestionThresholdProvider>
+      <HomePageContent />
+    </CongestionThresholdProvider>
+  );
+}
+
+function HomePageContent() {
   const [deviceData, setDeviceData] = useState<DeviceData | null>(null);
   const [allDeviceIds, setAllDeviceIds] = useState<string[]>([]);
   const [selectedDevices, setSelectedDevices] = useState<string[]>([]);
@@ -31,6 +44,15 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
   const [showOnlyLatest, setShowOnlyLatest] = useState(false);
+  const { congestionThreshold, setCongestionThreshold } = useCongestionThreshold();
+  const [isGeneratingDummyData, setIsGeneratingDummyData] = useState(false);
+  const [numDummyDevices, setNumDummyDevices] = useState(1); // Default to 1 dummy device
+  const [dummyIntervals, setDummyIntervals] = useState<Map<string, NodeJS.Timeout>>(new Map());
+  const deviceDataRef = useRef<DeviceData | null>(null);
+
+  useEffect(() => {
+    deviceDataRef.current = deviceData;
+  }, [deviceData]);
 
   useEffect(() => {
     const db = getDatabase(firebaseApp);
@@ -76,6 +98,13 @@ export default function HomePage() {
   }, [toast]);
 
   useEffect(() => {
+    // Cleanup interval on component unmount
+    return () => {
+      dummyIntervals.forEach(intervalId => clearInterval(intervalId));
+    };
+  }, [dummyIntervals]);
+
+  useEffect(() => {
     const q = query(collection(firestore, "stores"));
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
       const storesData: DocumentData[] = [];
@@ -112,31 +141,164 @@ export default function HomePage() {
     setSelectedDevices([]);
   }, []);
 
-  const createDummyData = () => {
+  const generateRandomTarget = useCallback(() => {
+    return {
+      latitude: MIN_COORD + Math.random() * (MAX_COORD - MIN_COORD),
+      longitude: MIN_COORD + Math.random() * (MAX_COORD - MIN_COORD),
+    };
+  }, []);
+
+  const toggleDummyDataGeneration = useCallback(() => {
+    const db = getDatabase(firebaseApp);
+
+    if (isGeneratingDummyData) {
+      // Stop generating dummy data
+      dummyIntervals.forEach(intervalId => clearInterval(intervalId));
+      setDummyIntervals(new Map());
+      setIsGeneratingDummyData(false);
+      toast({
+        title: "Dummy Data Stopped",
+        description: "Real-time dummy data generation has been stopped.",
+      });
+    } else {
+      // Start generating dummy data
+      let dummyDeviceIdsToManage = allDeviceIds.filter(id => id.startsWith("dummy-device-"));
+
+      const newDummyIntervals = new Map<string, NodeJS.Timeout>();
+
+      // Ensure we have at least numDummyDevices
+      while (dummyDeviceIdsToManage.length < numDummyDevices) {
+        const newDeviceId = `dummy-device-${Math.random().toString(36).substring(2, 8)}`;
+        dummyDeviceIdsToManage.push(newDeviceId);
+        toast({
+          title: "New Dummy Device Created",
+          description: `Created new dummy device: ${newDeviceId}`,
+        });
+      }
+
+      // If we have too many, stop the extra ones and remove them from the list
+      if (dummyDeviceIdsToManage.length > numDummyDevices) {
+        const devicesToRemove = dummyDeviceIdsToManage.splice(numDummyDevices);
+        devicesToRemove.forEach(deviceId => {
+          // Optionally, remove from Firebase as well if desired
+          // set(databaseRef(db, `devices/${deviceId}`), null);
+          toast({
+            title: "Dummy Device Removed",
+            description: `Removed dummy device: ${deviceId}`,
+          });
+          setAllDeviceIds(prev => prev.filter(id => id !== deviceId));
+          setSelectedDevices(prev => prev.filter(id => id !== deviceId));
+        });
+      }
+
+      // Set initial random positions for all dummy devices (new and existing)
+      dummyDeviceIdsToManage.forEach(deviceId => {
+        const initialPoint = {
+          latitude: MIN_COORD + Math.random() * (MAX_COORD - MIN_COORD),
+          longitude: MIN_COORD + Math.random() * (MAX_COORD - MIN_COORD),
+          timestamp: new Date().toISOString(),
+        };
+        set(databaseRef(db, `devices/${deviceId}/points/initial`), initialPoint); // Reset initial position
+      });
+
+      // const newDummyIntervals = new Map<string, NodeJS.Timeout>();
+
+      dummyDeviceIdsToManage.forEach(deviceId => {
+        const interval = setInterval(() => {
+          const currentDevicePoints = deviceDataRef.current?.[deviceId]?.points;
+          if (!currentDevicePoints) return;
+
+          const pointsArray = Object.values(currentDevicePoints)
+            .filter(p => typeof p.latitude === 'number' && typeof p.longitude === 'number' && p.timestamp)
+            .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+          if (pointsArray.length === 0) return;
+
+          const latestPoint = pointsArray[0];
+
+          let newLat = latestPoint.latitude + (Math.random() * 2 - 1) * MOVEMENT_DELTA;
+          let newLon = latestPoint.longitude + (Math.random() * 2 - 1) * MOVEMENT_DELTA;
+
+          // Keep coordinates within bounds
+          newLat = Math.max(MIN_COORD, Math.min(MAX_COORD, newLat));
+          newLon = Math.max(MIN_COORD, Math.min(MAX_COORD, newLon));
+
+          const newPoint = {
+            latitude: newLat,
+            longitude: newLon,
+            timestamp: new Date().toISOString(),
+          };
+          push(databaseRef(db, `devices/${deviceId}/points`), newPoint);
+        }, 500); // Update every 0.5 seconds for smoother movement
+
+        newDummyIntervals.set(deviceId, interval);
+      });
+
+      setDummyIntervals(newDummyIntervals);
+      setIsGeneratingDummyData(true);
+      toast({
+        title: "Dummy Data Started",
+        description: `Real-time dummy data generation started for ${dummyDeviceIdsToManage.length} device(s).`,
+      });
+    }
+  }, [isGeneratingDummyData, allDeviceIds, dummyIntervals, toast, deviceDataRef, setAllDeviceIds, setSelectedDevices]);
+
+  const handleCreateNewDummyDevice = useCallback(() => {
     const db = getDatabase(firebaseApp);
     const newDeviceId = `dummy-device-${Math.random().toString(36).substring(2, 8)}`;
-    const deviceRef = databaseRef(db, `devices/${newDeviceId}/points`);
 
-    const now = new Date();
-    const dummyPoints: { [key: string]: any } = {};
-    for (let i = 0; i < 5; i++) {
-      const timestamp = new Date(now.getTime() - i * 1000 * 60).toISOString(); // 1 minute intervals
-      const point = {
-        latitude: MIN_COORD + Math.random() * (MAX_COORD - MIN_COORD),
-        longitude: MIN_COORD + Math.random() * (MAX_COORD - MIN_COORD),
-        timestamp: timestamp,
-      };
-      const pointRef = push(deviceRef);
-      dummyPoints[pointRef.key!] = point;
-    }
+    const initialPoint = {
+      latitude: MIN_COORD + Math.random() * (MAX_COORD - MIN_COORD),
+      longitude: MIN_COORD + Math.random() * (MAX_COORD - MIN_COORD),
+      timestamp: new Date().toISOString(),
+    };
+    set(databaseRef(db, `devices/${newDeviceId}/points/initial`), initialPoint)
+      .then(() => {
+        toast({
+          title: "New Dummy Device Created",
+          description: `Created and started data generation for: ${newDeviceId}`,
+        });
 
-    set(databaseRef(db, `devices/${newDeviceId}`), { points: dummyPoints });
+        // Start interval for the new device
+        const interval = setInterval(() => {
+          const currentDevicePoints = deviceDataRef.current?.[newDeviceId]?.points;
+          if (!currentDevicePoints) return;
 
-    toast({
-      title: "Dummy Data Created",
-      description: `New device added: ${newDeviceId}`,
-    });
-  };
+          const pointsArray = Object.values(currentDevicePoints)
+            .filter(p => typeof p.latitude === 'number' && typeof p.longitude === 'number' && p.timestamp)
+            .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+          if (pointsArray.length === 0) return;
+
+          const latestPoint = pointsArray[0];
+
+          let newLat = latestPoint.latitude + (Math.random() * 2 - 1) * MOVEMENT_DELTA;
+          let newLon = latestPoint.longitude + (Math.random() * 2 - 1) * MOVEMENT_DELTA;
+
+          newLat = Math.max(MIN_COORD, Math.min(MAX_COORD, newLat));
+          newLon = Math.max(MIN_COORD, Math.min(MAX_COORD, newLon));
+
+          const newPoint = {
+            latitude: newLat,
+            longitude: newLon,
+            timestamp: new Date().toISOString(),
+          };
+          push(databaseRef(db, `devices/${newDeviceId}/points`), newPoint);
+        }, 500);
+
+        setDummyIntervals(prev => new Map(prev).set(newDeviceId, interval));
+        setAllDeviceIds(prev => [...prev, newDeviceId]);
+        setSelectedDevices(prev => [...prev, newDeviceId]); // Automatically select the new device
+      })
+      .catch(error => {
+        console.error("Error creating new dummy device:", error);
+        toast({
+          title: "Error",
+          description: `Failed to create new dummy device: ${error.message}`,
+          variant: "destructive",
+        });
+      });
+  }, [toast, deviceDataRef, setDummyIntervals, setAllDeviceIds, setSelectedDevices]);
 
   return (
     <SidebarProvider defaultOpen={true}>
@@ -168,9 +330,23 @@ export default function HomePage() {
             </>
           )}
           <div className="p-4 border-t">
-            <Button onClick={() => setShowOnlyLatest(!showOnlyLatest)} variant="outline" className="w-full">
-              {showOnlyLatest ? "Show Full History" : "Show Only Latest"}
-            </Button>
+            <div className="mb-4">
+              <label htmlFor="congestion-threshold" className="block text-sm font-medium text-gray-700 mb-2">
+                Congestion Threshold: {congestionThreshold}
+              </label>
+              <Slider
+                id="congestion-threshold"
+                min={1}
+                max={10}
+                step={1}
+                value={[congestionThreshold]}
+                onValueChange={(value) => setCongestionThreshold(value[0])}
+                className="w-full"
+              />
+            </div>
+            <Button onClick={() => setNumDummyDevices(prev => Math.max(1, prev - 1))} variant="outline" size="sm">-</Button>
+            <span className="mx-2">{numDummyDevices}</span>
+            <Button onClick={() => setNumDummyDevices(prev => prev + 1)} variant="outline" size="sm">+</Button>
           </div>
         </SidebarContent>
       </Sidebar>
@@ -198,6 +374,7 @@ export default function HomePage() {
                   selectedDevices={selectedDevices}
                   showOnlyLatest={showOnlyLatest}
                   stores={stores}
+                  congestionThreshold={congestionThreshold}
                 />
               </div>
             )}
@@ -217,7 +394,15 @@ export default function HomePage() {
             )}
           </main>
           <div className="absolute bottom-4 right-4 flex flex-col gap-2">
-            <Button onClick={createDummyData}>Create Dummy Data</Button>
+            <Button onClick={toggleDummyDataGeneration}>
+              {isGeneratingDummyData ? "Stop Dummy Data" : "Start Dummy Data"}
+            </Button>
+            <Button onClick={() => setShowOnlyLatest(!showOnlyLatest)}>
+              {showOnlyLatest ? "Show All Data" : "Show Only Latest Data"}
+            </Button>
+            <Button onClick={handleCreateNewDummyDevice}>
+              Create New Dummy Device
+            </Button>
             <Link href="/settings">
               <Button className="w-full">Settings</Button>
             </Link>

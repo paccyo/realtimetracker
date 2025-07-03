@@ -4,6 +4,8 @@ import React, { useState, useMemo } from 'react';
 import type { DeviceData, Point as PointType } from '@/types';
 import { Card, CardContent } from '@/components/ui/card';
 
+import { useCongestionThreshold } from "@/context/CongestionThresholdContext";
+
 interface MapDisplayProps {
   allDeviceData: DeviceData | null;
   selectedDevices: string[];
@@ -17,6 +19,7 @@ const RANGE = MAX_COORD - MIN_COORD; // 35
 const POINT_RADIUS_SVG_UNITS = 0.3; // Radius of points in SVG coordinate units
 const LATEST_POINT_RADIUS_SVG_UNITS = 0.5;
 
+
 // Define a list of distinct colors for paths
 const deviceColors = [
   "hsl(var(--primary))", // Deep Sky Blue (theme primary)
@@ -27,6 +30,7 @@ const deviceColors = [
 ];
 
 export function MapDisplay({ allDeviceData, selectedDevices, showOnlyLatest, stores }: MapDisplayProps) {
+  const { congestionThreshold } = useCongestionThreshold();
   const [hoveredPoint, setHoveredPoint] = useState<{ point: PointType; x: number; y: number; color: string } | null>(null);
 
   const transformCoordinates = (lon: number, lat: number) => {
@@ -70,7 +74,43 @@ export function MapDisplay({ allDeviceData, selectedDevices, showOnlyLatest, sto
     }).filter(p => p !== null);
   }, [allDeviceData, selectedDevices]);
 
-  const densityCircle = useMemo(() => {
+  const storeCongestionStatus = useMemo(() => {
+    const statusMap: { [key: string]: { count: number; status: string } } = {};
+
+    stores.forEach(store => {
+      let deviceCount = 0;
+      const storeMinX = store.positionX;
+      const storeMaxX = store.positionX + store.sizeX;
+      const storeMinY = store.positionY;
+      const storeMaxY = store.positionY + store.sizeY;
+
+      selectedDevices.forEach(deviceId => {
+        const device = allDeviceData?.[deviceId];
+        if (device?.points) {
+          const pointsArray = Object.values(device.points)
+            .filter(p => typeof p.latitude === 'number' && typeof p.longitude === 'number' && p.timestamp)
+            .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+          
+          if (pointsArray.length > 0) {
+            const latestPoint = pointsArray[0];
+            const { x, y } = transformCoordinates(latestPoint.longitude, latestPoint.latitude);
+
+            // Check if the latest point is within the store's bounding box
+            if (x >= storeMinX && x <= storeMaxX && y >= storeMinY && y <= storeMaxY) {
+              deviceCount++;
+            }
+          }
+        }
+      });
+
+      const status = deviceCount >= congestionThreshold ? "混雑中" : "閑散中";
+      statusMap[store.id] = { count: deviceCount, status };
+    });
+
+    return statusMap;
+  }, [allDeviceData, selectedDevices, stores, transformCoordinates, congestionThreshold]);
+
+  const congestionCircles = useMemo(() => {
     const latestPoints = selectedDevices.map(deviceId => {
       const device = allDeviceData?.[deviceId];
       if (!device?.points) return null;
@@ -80,7 +120,7 @@ export function MapDisplay({ allDeviceData, selectedDevices, showOnlyLatest, sto
       return pointsArray.length > 0 ? pointsArray[0] : null;
     }).filter((p): p is PointType => p !== null);
 
-    if (latestPoints.length < 2) return null;
+    if (latestPoints.length < 2) return [];
 
     const gridSize = 5; // Grid size in SVG units
     const grid: { [key: string]: PointType[] } = {};
@@ -96,62 +136,32 @@ export function MapDisplay({ allDeviceData, selectedDevices, showOnlyLatest, sto
       grid[key].push(point);
     });
 
-    let maxPoints = 0;
-    let densestCell: PointType[] | null = null;
-    let minPoints = Infinity;
-    let sparsestCell: PointType[] | null = null;
+    const circles: { cx: number; cy: number; r: number }[] = [];
 
     for (const key in grid) {
-      if (grid[key].length > maxPoints) {
-        maxPoints = grid[key].length;
-        densestCell = grid[key];
-      }
-      if (grid[key].length < minPoints) {
-        minPoints = grid[key].length;
-        sparsestCell = grid[key];
+      const cellPoints = grid[key];
+      if (cellPoints.length >= congestionThreshold) {
+        const transformedCellPoints = cellPoints.map(p => transformCoordinates(p.longitude, p.latitude));
+
+        const centerX = transformedCellPoints.reduce((sum, p) => sum + p.x, 0) / transformedCellPoints.length;
+        const centerY = transformedCellPoints.reduce((sum, p) => sum + p.y, 0) / transformedCellPoints.length;
+
+        const radius = Math.max(...transformedCellPoints.map(p => {
+          const dx = p.x - centerX;
+          const dy = p.y - centerY;
+          return Math.sqrt(dx * dx + dy * dy);
+        }));
+
+        circles.push({
+          cx: centerX,
+          cy: centerY,
+          r: radius + LATEST_POINT_RADIUS_SVG_UNITS, // Add padding
+        });
       }
     }
 
-    if (!densestCell || densestCell.length < 2) return null;
-
-    const transformedPointsDensest = densestCell.map(p => transformCoordinates(p.longitude, p.latitude));
-
-    const centerXDensest = transformedPointsDensest.reduce((sum, p) => sum + p.x, 0) / transformedPointsDensest.length;
-    const centerYDensest = transformedPointsDensest.reduce((sum, p) => sum + p.y, 0) / transformedPointsDensest.length;
-
-    const radiusDensest = Math.max(...transformedPointsDensest.map(p => {
-      const dx = p.x - centerXDensest;
-      const dy = p.y - centerYDensest;
-      return Math.sqrt(dx * dx + dy * dy);
-    }));
-
-    const denseCircle = {
-      cx: centerXDensest,
-      cy: centerYDensest,
-      r: radiusDensest + LATEST_POINT_RADIUS_SVG_UNITS, // Add padding
-    };
-
-    let sparseCircle = null;
-    if (sparsestCell && sparsestCell.length > 0) {
-      const transformedPointsSparsest = sparsestCell.map(p => transformCoordinates(p.longitude, p.latitude));
-      const centerXSparsest = transformedPointsSparsest.reduce((sum, p) => sum + p.x, 0) / transformedPointsSparsest.length;
-      const centerYSparsest = transformedPointsSparsest.reduce((sum, p) => sum + p.y, 0) / transformedPointsSparsest.length;
-
-      const radiusSparsest = transformedPointsSparsest.length > 0 ? Math.max(...transformedPointsSparsest.map(p => {
-        const dx = p.x - centerXSparsest;
-        const dy = p.y - centerYSparsest;
-        return Math.sqrt(dx * dx + dy * dy);
-      })) : LATEST_POINT_RADIUS_SVG_UNITS; // Default radius if only one point
-
-      sparseCircle = {
-        cx: centerXSparsest,
-        cy: centerYSparsest,
-        r: radiusSparsest + LATEST_POINT_RADIUS_SVG_UNITS, // Add padding
-      };
-    }
-
-    return { denseCircle, sparseCircle };
-  }, [allDeviceData, selectedDevices]);
+    return circles;
+  }, [allDeviceData, selectedDevices, congestionThreshold]);
 
   return (
     <Card className="w-full h-full shadow-lg overflow-hidden">
@@ -212,29 +222,20 @@ export function MapDisplay({ allDeviceData, selectedDevices, showOnlyLatest, sto
             );
           })}
 
-          {densityCircle?.denseCircle && (
+          {congestionCircles.map((circle, index) => (
             <circle
-              cx={densityCircle.denseCircle.cx}
-              cy={densityCircle.denseCircle.cy}
-              r={densityCircle.denseCircle.r}
+              key={index}
+              cx={circle.cx}
+              cy={circle.cy}
+              r={circle.r}
               fill="red"
               fillOpacity="0.3"
               stroke="red"
               strokeWidth="0.1"
             />
-          )}
+          ))}
 
-          {densityCircle?.sparseCircle && (
-            <circle
-              cx={densityCircle.sparseCircle.cx}
-              cy={densityCircle.sparseCircle.cy}
-              r={densityCircle.sparseCircle.r}
-              fill="blue"
-              fillOpacity="0.3"
-              stroke="blue"
-              strokeWidth="0.1"
-            />
-          )}
+          
 
           {hoveredPoint && (
             <g transform={`translate(${hoveredPoint.x} ${hoveredPoint.y})`}>
@@ -263,30 +264,49 @@ export function MapDisplay({ allDeviceData, selectedDevices, showOnlyLatest, sto
           )}
 
           {/* Render Stores */}
-          {stores.map(store => (
-            <g key={store.id}>
-              <rect
-                x={store.positionX}
-                y={store.positionY}
-                width={store.sizeX}
-                height={store.sizeY}
-                fill="rgba(0, 255, 0, 0.2)" // Green semi-transparent fill
-                stroke="green"
-                strokeWidth="0.1"
-              />
-              <text
-                x={store.positionX + store.sizeX / 2}
-                y={store.positionY + store.sizeY / 2}
-                textAnchor="middle"
-                dominantBaseline="middle"
-                fontSize="0.8"
-                fill="black"
-                fontFamily="Inter, sans-serif"
-              >
-                {store.name}
-              </text>
-            </g>
-          ))}
+          {stores.map(store => {
+            const congestionInfo = storeCongestionStatus[store.id];
+            const statusText = congestionInfo ? congestionInfo.status : "";
+            const statusColor = congestionInfo && congestionInfo.status === "混雑中" ? "red" : "green";
+
+            return (
+              <g key={store.id}>
+                <rect
+                  x={store.positionX}
+                  y={store.positionY}
+                  width={store.sizeX}
+                  height={store.sizeY}
+                  fill="rgba(0, 255, 0, 0.2)" // Green semi-transparent fill
+                  stroke="green"
+                  strokeWidth="0.1"
+                />
+                <text
+                  x={store.positionX + store.sizeX / 2}
+                  y={store.positionY + store.sizeY / 2 - 0.5} // Adjust Y to place name above status
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fontSize="0.8"
+                  fill="black"
+                  fontFamily="Inter, sans-serif"
+                >
+                  {store.name}
+                </text>
+                {statusText && (
+                  <text
+                    x={store.positionX + store.sizeX / 2}
+                    y={store.positionY + store.sizeY / 2 + 0.5} // Adjust Y to place status below name
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fontSize="0.7"
+                    fill={statusColor}
+                    fontFamily="Inter, sans-serif"
+                  >
+                    {statusText}
+                  </text>
+                )}
+              </g>
+            );
+          })}
         </svg>
       </CardContent>
     </Card>

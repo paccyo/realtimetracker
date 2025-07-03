@@ -3,11 +3,22 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { MIN_COORD, MAX_COORD } from "@/components/MapDisplay";
 
-interface MapSelectionToolProps {
-  onSelectionComplete: (selection: { x: number; y: number; width: number; height: number } | null) => void;
+interface Store {
+  id: string;
+  name: string;
+  category: string;
+  positionX: number;
+  positionY: number;
+  sizeX: number;
+  sizeY: number;
 }
 
-const MapSelectionTool: React.FC<MapSelectionToolProps> = ({ onSelectionComplete }) => {
+interface MapSelectionToolProps {
+  onSelectionComplete: (selection: { x: number; y: number; width: number; height: number } | null) => void;
+  existingStores: Store[];
+}
+
+const MapSelectionTool: React.FC<MapSelectionToolProps> = ({ onSelectionComplete, existingStores }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [startPoint, setStartPoint] = useState<{ x: number; y: number } | null>(null);
@@ -88,6 +99,19 @@ const MapSelectionTool: React.FC<MapSelectionToolProps> = ({ onSelectionComplete
             strokeWidth="0.1"
           />
         )}
+
+        {existingStores.map((store) => (
+          <rect
+            key={store.id}
+            x={store.positionX}
+            y={store.positionY}
+            width={store.sizeX}
+            height={store.sizeY}
+            fill="rgba(255, 0, 0, 0.3)" // Red color for existing stores
+            stroke="red"
+            strokeWidth="0.1"
+          />
+        ))}
       </svg>
     </div>
   );
