@@ -32,6 +32,7 @@ const deviceColors = [
 export function MapDisplay({ allDeviceData, selectedDevices, showOnlyLatest, stores }: MapDisplayProps) {
   const { congestionThreshold } = useCongestionThreshold();
   const [hoveredPoint, setHoveredPoint] = useState<{ point: PointType; x: number; y: number; color: string } | null>(null);
+  const [hoveredStore, setHoveredStore] = useState<DocumentData | null>(null);
 
   const transformCoordinates = (lon: number, lat: number) => {
     // Check if coordinates are valid numbers
@@ -270,7 +271,11 @@ export function MapDisplay({ allDeviceData, selectedDevices, showOnlyLatest, sto
             const statusColor = congestionInfo && congestionInfo.status === "混雑中" ? "red" : "green";
 
             return (
-              <g key={store.id}>
+              <g
+                key={store.id}
+                onMouseEnter={() => setHoveredStore(store)}
+                onMouseLeave={() => setHoveredStore(null)}
+              >
                 <rect
                   x={store.longitude}
                   y={21-store.latitude}
@@ -303,6 +308,29 @@ export function MapDisplay({ allDeviceData, selectedDevices, showOnlyLatest, sto
                   >
                     {statusText}
                   </text>
+                )}
+                {hoveredStore && hoveredStore.id === store.id && hoveredStore.hasCoupon && (
+                  <g>
+                    <rect
+                      x={store.longitude + store.width / 2 + 1} // Position to the right of the store
+                      y={21-store.latitude - 2} // Position above the store
+                      width={8} // Adjust width as needed
+                      height={2} // Adjust height as needed
+                      fill="hsl(var(--popover))"
+                      stroke="hsl(var(--accent))"
+                      strokeWidth="0.05"
+                      rx="0.2"
+                    />
+                    <text
+                      x={store.longitude + store.width / 2 + 1.2} // Text padding
+                      y={21-store.latitude - 1.5} // Adjust vertical position
+                      fontSize="0.6"
+                      fill="hsl(var(--popover-foreground))"
+                      fontFamily="Inter, sans-serif"
+                    >
+                      {hoveredStore.coupon_title} ({hoveredStore.coupon_per}%) 
+                    </text>
+                  </g>
                 )}
               </g>
             );

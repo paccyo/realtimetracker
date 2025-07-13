@@ -1,4 +1,3 @@
-
 export interface Point {
   latitude: number;
   longitude: number;
@@ -16,4 +15,16 @@ export interface Device {
 
 export interface DeviceData {
   [deviceId: string]: Device;
+}
+
+export interface Store {
+  id: string;
+  name: string;
+  positionX: number;
+  positionY: number;
+  sizeX: number;
+  sizeY: number;
+  hasCoupon?: boolean;
+  coupon_title?: string;
+  coupon_per?: string;
 }
