@@ -21,10 +21,10 @@ interface Store {
   id: string;
   name: string;
   category: string;
-  positionX: number;
-  positionY: number;
-  sizeX: number;
-  sizeY: number;
+  latitude: number;
+  longitude: number;
+  width: number;
+  height: number;
 }
 
 const SettingsPage = () => {
@@ -39,7 +39,16 @@ const SettingsPage = () => {
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
       const storesData: Store[] = [];
       querySnapshot.forEach((doc) => {
-        storesData.push({ id: doc.id, ...doc.data() } as Store);
+        const data = doc.data();
+        storesData.push({
+          id: doc.id,
+          name: data.name || '',
+          category: data.category || '',
+          latitude: data.latitude || 0,
+          longitude: data.longitude || 0,
+          width: data.width || 0,
+          height: data.height || 0,
+        });
       });
       setStores(storesData);
     });
@@ -73,10 +82,10 @@ const SettingsPage = () => {
       await addDoc(collection(firestore, "stores"), {
         name: storeName,
         category: storeCategory,
-        positionX: selectedArea.x,
-        positionY: selectedArea.y,
-        sizeX: selectedArea.width,
-        sizeY: selectedArea.height,
+        latitude: 21-selectedArea.y,
+        longitude: selectedArea.x,
+        width: selectedArea.width,
+        height: selectedArea.height,
         timestamp: new Date().toISOString(),
       });
 
@@ -148,8 +157,8 @@ const SettingsPage = () => {
               <li key={store.id} className="border p-4 rounded-lg shadow-sm">
                 <h3 className="font-semibold">{store.name}</h3>
                 <p className="text-sm text-muted-foreground">Category: {store.category}</p>
-                <p className="text-sm text-muted-foreground">X: {store.positionX.toFixed(2)}, Y: {store.positionY.toFixed(2)}</p>
-                <p className="text-sm text-muted-foreground">Width: {store.sizeX.toFixed(2)}, Height: {store.sizeY.toFixed(2)}</p>
+                <p className="text-sm text-muted-foreground">X: {store.latitude.toFixed(2)}, Y: {store.longitude.toFixed(2)}</p>
+                <p className="text-sm text-muted-foreground">Width: {store.width.toFixed(2)}, Height: {store.height.toFixed(2)}</p>
               </li>
             ))}
           </ul>

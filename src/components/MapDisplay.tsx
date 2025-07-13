@@ -13,8 +13,8 @@ interface MapDisplayProps {
   stores: DocumentData[];
 }
 
-export const MIN_COORD = -5;
-export const MAX_COORD = 30;
+export const MIN_COORD = 0;
+export const MAX_COORD = 21;
 const RANGE = MAX_COORD - MIN_COORD; // 35
 const POINT_RADIUS_SVG_UNITS = 0.3; // Radius of points in SVG coordinate units
 const LATEST_POINT_RADIUS_SVG_UNITS = 0.5;
@@ -79,10 +79,10 @@ export function MapDisplay({ allDeviceData, selectedDevices, showOnlyLatest, sto
 
     stores.forEach(store => {
       let deviceCount = 0;
-      const storeMinX = store.positionX;
-      const storeMaxX = store.positionX + store.sizeX;
-      const storeMinY = store.positionY;
-      const storeMaxY = store.positionY + store.sizeY;
+      const storeMinX = store.latitude;
+      const storeMaxX = store.latitude + store.width;
+      const storeMinY = store.longitude;
+      const storeMaxY = store.longitude + store.height;
 
       selectedDevices.forEach(deviceId => {
         const device = allDeviceData?.[deviceId];
@@ -181,7 +181,7 @@ export function MapDisplay({ allDeviceData, selectedDevices, showOnlyLatest, sto
             width={RANGE}
             height={RANGE}
             preserveAspectRatio="xMidYMid slice"
-            transform={`rotate(180, ${MIN_COORD + RANGE / 2}, ${MIN_COORD + RANGE / 2})`}
+            transform={`rotate(0, ${MIN_COORD + RANGE / 2}, ${MIN_COORD + RANGE / 2})`}
           />
 
           {pathsToDisplay.map(devicePath => {
@@ -272,17 +272,17 @@ export function MapDisplay({ allDeviceData, selectedDevices, showOnlyLatest, sto
             return (
               <g key={store.id}>
                 <rect
-                  x={store.positionX}
-                  y={store.positionY}
-                  width={store.sizeX}
-                  height={store.sizeY}
+                  x={store.longitude}
+                  y={21-store.latitude}
+                  width={store.width}
+                  height={store.height}
                   fill="rgba(0, 255, 0, 0.2)" // Green semi-transparent fill
                   stroke="green"
                   strokeWidth="0.1"
                 />
                 <text
-                  x={store.positionX + store.sizeX / 2}
-                  y={store.positionY + store.sizeY / 2 - 0.5} // Adjust Y to place name above status
+                  x={store.longitude + store.width / 2}
+                  y={21-store.latitude + store.height / 2 - 0.5} // Adjust Y to place name above status
                   textAnchor="middle"
                   dominantBaseline="middle"
                   fontSize="0.8"
@@ -293,8 +293,8 @@ export function MapDisplay({ allDeviceData, selectedDevices, showOnlyLatest, sto
                 </text>
                 {statusText && (
                   <text
-                    x={store.positionX + store.sizeX / 2}
-                    y={store.positionY + store.sizeY / 2 + 0.5} // Adjust Y to place status below name
+                    x={store.longitude + store.width / 2}
+                    y={21-store.latitude + store.height / 2 + 0.5} // Adjust Y to place status below name
                     textAnchor="middle"
                     dominantBaseline="middle"
                     fontSize="0.7"

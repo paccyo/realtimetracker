@@ -20,6 +20,7 @@ const MOVEMENT_DELTA = 0.5; // Adjust this value for smaller/larger movements
 
 import Link from "next/link";
 import dynamic from 'next/dynamic';
+import { getCouponRecommendation } from '@/actions/genkitActions';
 
 const MapDisplay = dynamic(() => import('@/components/MapDisplay').then(mod => mod.MapDisplay), { 
   ssr: false,
@@ -243,6 +244,91 @@ function HomePageContent() {
     }
   }, [isGeneratingDummyData, allDeviceIds, dummyIntervals, toast, deviceDataRef, setAllDeviceIds, setSelectedDevices]);
 
+  const handleCouponRecommendation = useCallback(async () => {
+    if (!deviceData || Object.keys(deviceData).length === 0) {
+      toast({
+        title: "No Device Data",
+        description: "Cannot recommend coupons without device data.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (stores.length === 0) {
+      toast({
+        title: "No Stores Registered",
+        description: "Please register stores in the settings page first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    toast({
+      title: "Generating Coupon Recommendation",
+      description: "Please wait while AI analyzes the data...",
+    });
+
+    try {
+      const formattedStores = stores.map(store => {
+        const devicesInStore = Object.values(deviceData).filter(device => {
+          const latestPoint = Object.values(device.points || {}).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+          if (!latestPoint) return false;
+
+          const { latitude, longitude } = latestPoint;
+          const { positionX, positionY, sizeX, sizeY } = store;
+
+          // Check if the device's latest point is within the store's boundaries
+          return (
+            latitude >= positionY &&
+            latitude <= (positionY + sizeY) &&
+            longitude >= positionX &&
+            longitude <= (positionX + sizeX)
+          );
+        }).length;
+
+        let congestionStatus = "low";
+        if (devicesInStore >= congestionThreshold) {
+          congestionStatus = "high";
+        } else if (devicesInStore > 0) {
+          congestionStatus = "medium";
+        }
+
+        return {
+          id: store.id,
+          name: store.name,
+          positionX: store.positionX,
+          positionY: store.positionY,
+          sizeX: store.sizeX,
+          sizeY: store.sizeY,
+          congestionStatus: congestionStatus,
+        };
+      });
+
+      // Assuming no specific congested areas are identified on this page for now
+      const congestedAreas: any[] = []; 
+
+      const result = await getCouponRecommendation(congestedAreas, formattedStores);
+
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+
+      toast({
+        title: "AI Coupon Recommendation",
+        description: result.response,
+        duration: 9000,
+      });
+
+    } catch (error) {
+      console.error("Error calling Genkit flow:", error);
+      toast({
+        title: "Error",
+        description: `Failed to get coupon recommendation: ${error instanceof Error ? error.message : String(error)}`,
+        variant: "destructive",
+      });
+    }
+  }, [deviceData, stores, congestionThreshold, toast]);
+
   const handleCreateNewDummyDevice = useCallback(() => {
     const db = getDatabase(firebaseApp);
     const newDeviceId = `dummy-device-${Math.random().toString(36).substring(2, 8)}`;
@@ -359,7 +445,7 @@ function HomePageContent() {
                 Realtime Tracker
               </h1>
             </div>
-            {/* Placeholder for potential header actions */}
+            <Button onClick={handleCouponRecommendation} variant="outline">AIクーポン推薦</Button>
           </header>
           <main className="flex-grow p-4 overflow-auto bg-background">
             {isLoading && (

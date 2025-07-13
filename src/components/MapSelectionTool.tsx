@@ -7,10 +7,10 @@ interface Store {
   id: string;
   name: string;
   category: string;
-  positionX: number;
-  positionY: number;
-  sizeX: number;
-  sizeY: number;
+  longitude: number;
+  latitude: number;
+  width: number;
+  height: number;
 }
 
 interface MapSelectionToolProps {
@@ -85,7 +85,7 @@ const MapSelectionTool: React.FC<MapSelectionToolProps> = ({ onSelectionComplete
           width={MAX_COORD - MIN_COORD}
           height={MAX_COORD - MIN_COORD}
           preserveAspectRatio="xMidYMid slice"
-          transform={`rotate(180, ${(MIN_COORD + MAX_COORD) / 2}, ${(MIN_COORD + MAX_COORD) / 2})`}
+          transform={`rotate(0, ${(MIN_COORD + MAX_COORD) / 2}, ${(MIN_COORD + MAX_COORD) / 2})`}
         />
 
         {currentRect && (
@@ -103,10 +103,10 @@ const MapSelectionTool: React.FC<MapSelectionToolProps> = ({ onSelectionComplete
         {existingStores.map((store) => (
           <rect
             key={store.id}
-            x={store.positionX}
-            y={store.positionY}
-            width={store.sizeX}
-            height={store.sizeY}
+            x={store.longitude}
+            y={21-store.latitude}
+            width={store.width}
+            height={store.height}
             fill="rgba(255, 0, 0, 0.3)" // Red color for existing stores
             stroke="red"
             strokeWidth="0.1"
