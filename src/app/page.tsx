@@ -5,9 +5,11 @@ import { CongestionThresholdProvider, useCongestionThreshold } from "@/context/C
 import { getDatabase, ref as databaseRef, onValue, set, push } from "firebase/database";
 import { collection, onSnapshot, query, DocumentData } from "firebase/firestore";
 import { firebaseApp, firestore } from "@/lib/firebase";
+import { doc, updateDoc } from "firebase/firestore";
 import type { DeviceData } from "@/types";
 
 import { SidebarProvider, Sidebar, SidebarHeader, SidebarContent, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
+import { CouponCard } from "@/components/CouponCard";
 import { DeviceSelector } from "@/components/DeviceSelector";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -50,6 +52,7 @@ function HomePageContent() {
   const [numDummyDevices, setNumDummyDevices] = useState(1); // Default to 1 dummy device
   const [dummyIntervals, setDummyIntervals] = useState<Map<string, NodeJS.Timeout>>(new Map());
   const deviceDataRef = useRef<DeviceData | null>(null);
+  const [recommendedCoupon, setRecommendedCoupon] = useState<{ storeId: string; couponTitle: string; couponPer: string } | null>(null);
 
   useEffect(() => {
     deviceDataRef.current = deviceData;
@@ -313,11 +316,20 @@ function HomePageContent() {
         throw new Error(result.error);
       }
 
-      toast({
-        title: "AI Coupon Recommendation",
-        description: result.response,
-        duration: 9000,
-      });
+      const couponData = JSON.parse(result.response);
+      if (couponData.store_id) {
+        setRecommendedCoupon({
+          storeId: couponData.store_id,
+          couponTitle: couponData.coupon_title,
+          couponPer: couponData.coupon_per,
+        });
+      } else {
+        toast({
+          title: "AI Coupon Recommendation",
+          description: result.response,
+          duration: 9000,
+        });
+      }
 
     } catch (error) {
       console.error("Error calling Genkit flow:", error);
@@ -385,6 +397,30 @@ function HomePageContent() {
         });
       });
   }, [toast, deviceDataRef, setDummyIntervals, setAllDeviceIds, setSelectedDevices]);
+
+  const handleIssueCoupon = useCallback(async (storeId: string, couponTitle: string, couponPer: string) => {
+    try {
+      const storeRef = doc(firestore, 'stores', storeId);
+      await updateDoc(storeRef, {
+        hasCoupon: true,
+        coupon_title: couponTitle,
+        coupon_per: couponPer,
+      });
+      toast({
+        title: "Coupon Issued",
+        description: `Coupon "${couponTitle}" (${couponPer}%) issued for store: ${storeId}`,
+        duration: 5000,
+      });
+      setRecommendedCoupon(null); // Clear the recommended coupon after issuing
+    } catch (error) {
+      console.error("Error issuing coupon:", error);
+      toast({
+        title: "Error",
+        description: `Failed to issue coupon: ${error instanceof Error ? error.message : String(error)}`,
+        variant: "destructive",
+      });
+    }
+  }, [toast]);
 
   return (
     <SidebarProvider defaultOpen={true}>
@@ -493,6 +529,17 @@ function HomePageContent() {
               <Button className="w-full">Settings</Button>
             </Link>
           </div>
+          {recommendedCoupon && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <CouponCard
+                storeId={recommendedCoupon.storeId}
+                couponTitle={recommendedCoupon.couponTitle}
+                couponPer={recommendedCoupon.couponPer}
+                onIssueCoupon={handleIssueCoupon}
+                onClose={() => setRecommendedCoupon(null)}
+              />
+            </div>
+          )}
         </div>
       </SidebarInset>
     </SidebarProvider>

@@ -25,9 +25,9 @@ export async function getCouponRecommendation(congestedAreas: any[], stores: any
         - 店舗一覧（店舗ID、名前、座標、混雑しているかどうか）：
     
         ■ 出力情報：
-        - 店舗ID
-        - クーポンの割引率 (例：50%OFF)
-        - クーポンタイトル（例：タイムセール！）
+        - store_id 店舗ID
+        - coupon_per クーポンの割引率 (例：50%OFF)
+        - coupon_title クーポンタイトル（例：タイムセール！）
     
         ■ 入力context
         ${context}
@@ -37,7 +37,7 @@ export async function getCouponRecommendation(congestedAreas: any[], stores: any
           responseSchema: {
             store_id: Type.STRING,
             coupon_per: Type.STRING,
-            title: Type.STRING,
+            coupon_title: Type.STRING,
           },
         },
       });
