@@ -3,15 +3,14 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { CongestionThresholdProvider, useCongestionThreshold } from "@/context/CongestionThresholdContext";
 import { getDatabase, ref as databaseRef, onValue, set, push } from "firebase/database";
-import { collection, onSnapshot, query, DocumentData } from "firebase/firestore";
+import { collection, onSnapshot, query, DocumentData, updateDoc, doc } from "firebase/firestore";
 import { firebaseApp, firestore } from "@/lib/firebase";
-import { doc, updateDoc } from "firebase/firestore";
 import type { DeviceData } from "@/types";
 
 import { SidebarProvider, Sidebar, SidebarHeader, SidebarContent, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
-import { CouponCard } from "@/components/CouponCard";
 import { DeviceSelector } from "@/components/DeviceSelector";
 import { useToast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button"; // For potential future actions
 import { PanelLeft } from "lucide-react";
@@ -22,6 +21,7 @@ const MOVEMENT_DELTA = 0.5; // Adjust this value for smaller/larger movements
 
 import Link from "next/link";
 import dynamic from 'next/dynamic';
+import { DateTimePicker } from "@/components/DateTimePicker";
 import { getCouponRecommendation } from '@/actions/genkitActions';
 
 const MapDisplay = dynamic(() => import('@/components/MapDisplay').then(mod => mod.MapDisplay), { 
@@ -52,7 +52,7 @@ function HomePageContent() {
   const [numDummyDevices, setNumDummyDevices] = useState(1); // Default to 1 dummy device
   const [dummyIntervals, setDummyIntervals] = useState<Map<string, NodeJS.Timeout>>(new Map());
   const deviceDataRef = useRef<DeviceData | null>(null);
-  const [recommendedCoupon, setRecommendedCoupon] = useState<{ storeId: string; couponTitle: string; couponPer: string } | null>(null);
+  const [selectedDateTime, setSelectedDateTime] = useState(new Date());
 
   useEffect(() => {
     deviceDataRef.current = deviceData;
@@ -202,6 +202,7 @@ function HomePageContent() {
           longitude: MIN_COORD + Math.random() * (MAX_COORD - MIN_COORD),
           timestamp: new Date().toISOString(),
         };
+        console.log(`device ${deviceId}, points${initialPoint}`);
         set(databaseRef(db, `devices/${deviceId}/points/initial`), initialPoint); // Reset initial position
       });
 
@@ -316,20 +317,23 @@ function HomePageContent() {
         throw new Error(result.error);
       }
 
-      const couponData = JSON.parse(result.response);
-      if (couponData.store_id) {
-        setRecommendedCoupon({
-          storeId: couponData.store_id,
-          couponTitle: couponData.coupon_title,
-          couponPer: couponData.coupon_per,
-        });
-      } else {
-        toast({
-          title: "AI Coupon Recommendation",
-          description: result.response,
-          duration: 9000,
-        });
-      }
+      toast({
+        title: "AI Coupon Recommendation",
+        description: result ? `クーポン: ${result.coupon_title} ${result.discountRate}` : result.response,
+        action: result.recommendedCoupon && (
+          <ToastAction
+            altText="Issue Coupon"
+            onClick={() => handleIssueCoupon(
+              result.recommendedCoupon.店舗ID,
+              result.recommendedCoupon.クーポンタイトル,
+              result.recommendedCoupon.クーポンの割引率
+            )}
+          >
+            クーポン発行
+          </ToastAction>
+        ),
+        duration: 9000,
+      });
 
     } catch (error) {
       console.error("Error calling Genkit flow:", error);
@@ -340,6 +344,28 @@ function HomePageContent() {
       });
     }
   }, [deviceData, stores, congestionThreshold, toast]);
+
+  const handleIssueCoupon = useCallback(async (storeId: string, couponTitle: string, couponPer: string) => {
+    try {
+      const storeRef = doc(firestore, "stores", storeId);
+      await updateDoc(storeRef, {
+        coupon_title: couponTitle,
+        coupon_per: couponPer,
+        hasCoupon: true, // Set hasCoupon to true when a coupon is issued
+      });
+      toast({
+        title: "クーポン発行済み",
+        description: `店舗ID: ${storeId} にクーポン「${couponTitle} ${couponPer}」を発行しました。`,
+      });
+    } catch (error) {
+      console.error("Error issuing coupon:", error);
+      toast({
+        title: "クーポン発行エラー",
+        description: `クーポンの発行に失敗しました: ${error instanceof Error ? error.message : String(error)}`,
+        variant: "destructive",
+      });
+    }
+  }, [toast]);
 
   const handleCreateNewDummyDevice = useCallback(() => {
     const db = getDatabase(firebaseApp);
@@ -385,6 +411,8 @@ function HomePageContent() {
         }, 500);
 
         setDummyIntervals(prev => new Map(prev).set(newDeviceId, interval));
+        console.log(`${allDeviceIds}`);
+
         setAllDeviceIds(prev => [...prev, newDeviceId]);
         setSelectedDevices(prev => [...prev, newDeviceId]); // Automatically select the new device
       })
@@ -397,30 +425,6 @@ function HomePageContent() {
         });
       });
   }, [toast, deviceDataRef, setDummyIntervals, setAllDeviceIds, setSelectedDevices]);
-
-  const handleIssueCoupon = useCallback(async (storeId: string, couponTitle: string, couponPer: string) => {
-    try {
-      const storeRef = doc(firestore, 'stores', storeId);
-      await updateDoc(storeRef, {
-        hasCoupon: true,
-        coupon_title: couponTitle,
-        coupon_per: couponPer,
-      });
-      toast({
-        title: "Coupon Issued",
-        description: `Coupon "${couponTitle}" (${couponPer}%) issued for store: ${storeId}`,
-        duration: 5000,
-      });
-      setRecommendedCoupon(null); // Clear the recommended coupon after issuing
-    } catch (error) {
-      console.error("Error issuing coupon:", error);
-      toast({
-        title: "Error",
-        description: `Failed to issue coupon: ${error instanceof Error ? error.message : String(error)}`,
-        variant: "destructive",
-      });
-    }
-  }, [toast]);
 
   return (
     <SidebarProvider defaultOpen={true}>
@@ -466,6 +470,7 @@ function HomePageContent() {
                 className="w-full"
               />
             </div>
+            <DateTimePicker onDateTimeChange={setSelectedDateTime} />
             <Button onClick={() => setNumDummyDevices(prev => Math.max(1, prev - 1))} variant="outline" size="sm">-</Button>
             <span className="mx-2">{numDummyDevices}</span>
             <Button onClick={() => setNumDummyDevices(prev => prev + 1)} variant="outline" size="sm">+</Button>
@@ -529,17 +534,6 @@ function HomePageContent() {
               <Button className="w-full">Settings</Button>
             </Link>
           </div>
-          {recommendedCoupon && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <CouponCard
-                storeId={recommendedCoupon.storeId}
-                couponTitle={recommendedCoupon.couponTitle}
-                couponPer={recommendedCoupon.couponPer}
-                onIssueCoupon={handleIssueCoupon}
-                onClose={() => setRecommendedCoupon(null)}
-              />
-            </div>
-          )}
         </div>
       </SidebarInset>
     </SidebarProvider>

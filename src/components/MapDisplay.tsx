@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import type { DeviceData, Point as PointType } from '@/types';
 import { Card, CardContent } from '@/components/ui/card';
 
@@ -33,6 +33,23 @@ export function MapDisplay({ allDeviceData, selectedDevices, showOnlyLatest, sto
   const { congestionThreshold } = useCongestionThreshold();
   const [hoveredPoint, setHoveredPoint] = useState<{ point: PointType; x: number; y: number; color: string } | null>(null);
   const [hoveredStore, setHoveredStore] = useState<DocumentData | null>(null);
+  const [imageLoaded, setImageLoaded] = useState(false);
+
+  useEffect(() => {
+    const img = new Image();
+    img.src = "/picture/142.png";
+    img.onload = () => setImageLoaded(true);
+    img.onerror = () => setImageLoaded(false);
+  }, []);
+
+  const renderGrid = () => {
+    const lines = [];
+    for (let i = MIN_COORD; i <= MAX_COORD; i++) {
+      lines.push(<line key={`v-${i}`} x1={i} y1={MIN_COORD} x2={i} y2={MAX_COORD} stroke="lightgray" strokeWidth="0.1" />);
+      lines.push(<line key={`h-${i}`} x1={MIN_COORD} y1={i} x2={MAX_COORD} y2={i} stroke="lightgray" strokeWidth="0.1" />);
+    }
+    return lines;
+  };
 
   const transformCoordinates = (lon: number, lat: number) => {
     // Check if coordinates are valid numbers
@@ -142,6 +159,7 @@ export function MapDisplay({ allDeviceData, selectedDevices, showOnlyLatest, sto
     for (const key in grid) {
       const cellPoints = grid[key];
       if (cellPoints.length >= congestionThreshold) {
+        console.log(`Grid Cell: ${key}, Device Count: ${cellPoints.length}`);
         const transformedCellPoints = cellPoints.map(p => transformCoordinates(p.longitude, p.latitude));
 
         const centerX = transformedCellPoints.reduce((sum, p) => sum + p.x, 0) / transformedCellPoints.length;
@@ -174,16 +192,20 @@ export function MapDisplay({ allDeviceData, selectedDevices, showOnlyLatest, sto
           height="100%"
           aria-label="Map of device paths"
         >
-          {/* Background Image */}
-          <image
-            href="/picture/142.png"
-            x={MIN_COORD}
-            y={MIN_COORD}
-            width={RANGE}
-            height={RANGE}
-            preserveAspectRatio="xMidYMid slice"
-            transform={`rotate(0, ${MIN_COORD + RANGE / 2}, ${MIN_COORD + RANGE / 2})`}
-          />
+          {/* Grid or Background Image */}
+          {imageLoaded ? (
+            <image
+              href="/picture/142.png"
+              x={MIN_COORD}
+              y={MIN_COORD}
+              width={RANGE}
+              height={RANGE}
+              preserveAspectRatio="xMidYMid slice"
+              transform={`rotate(0, ${MIN_COORD + RANGE / 2}, ${MIN_COORD + RANGE / 2})`}
+            />
+          ) : (
+            renderGrid()
+          )}
 
           {pathsToDisplay.map(devicePath => {
             if (!devicePath) return null;

@@ -1,0 +1,17 @@
+{
+    "device1": {
+        "points": {
+            "p1": {"latitude": 10, "longitude": 10, "timestamp": "2024-07-24T10:00:00Z"}
+        }
+    },
+    "device2": {
+        "points": {
+            "p1": {"latitude": 10.5, "longitude": 10.5, "timestamp": "2024-07-24T10:01:00Z"}
+        }
+    },
+    "device3": {
+        "points": {
+            "p1": {"latitude": 18, "longitude": 18, "timestamp": "2024-07-24T10:02:00Z"}
+        }
+    }
+}
